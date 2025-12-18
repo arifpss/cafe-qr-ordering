@@ -1227,4 +1227,5 @@ app.post("/api/admin/settings/discounts", requireRole(["admin", "manager"]), asy
   }
 });
 
+export const onRequest = app.fetch;
 export default app;

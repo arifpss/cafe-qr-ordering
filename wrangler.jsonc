@@ -6,7 +6,7 @@
     {
       "binding": "DB",
       "database_name": "cafe-qr-db",
-      "database_id": "<D1_DATABASE_ID>"
+      "database_id": "0736ddde-dea0-4a32-a091-1a874e5ba84e"
     }
   ],
   "vars": {
