@@ -15,6 +15,7 @@ export interface UserProfile {
   name: string;
   email?: string | null;
   phone: string;
+  username?: string | null;
   points: number;
   badge: BadgeInfo;
   discountPercent: number;

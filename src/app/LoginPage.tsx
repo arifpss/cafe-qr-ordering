@@ -11,7 +11,7 @@ export const LoginPage: React.FC = () => {
   const { t } = useI18n();
   const { login, user, refresh } = useAuth();
   const navigate = useNavigate();
-  const [phone, setPhone] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -24,7 +24,7 @@ export const LoginPage: React.FC = () => {
     setError(null);
     setSuccess(null);
     try {
-      const profile = await login(phone, password);
+      const profile = await login(identifier, password);
       await refresh();
       if (profile.mustChangePassword) {
         setSuccess(t("mustChangePassword"));
@@ -64,7 +64,11 @@ export const LoginPage: React.FC = () => {
       <Card className="space-y-4">
         <h2 className="font-display text-2xl">{t("loginAnywhere")}</h2>
         <form className="space-y-3" onSubmit={handleLogin}>
-          <Input label={t("phone")} value={phone} onChange={(event) => setPhone(event.target.value)} />
+          <Input
+            label={t("phoneOrUsername")}
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+          />
           <Input
             label={t("password")}
             type="password"

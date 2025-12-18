@@ -54,8 +54,9 @@ npm run cf:migrate:local
 PASSWORD_PEPPER=your-pepper npm run cf:seed -- --local
 ```
 Default admin:
+- Username: `admin`
 - Phone: `01000000000`
-- Password: `Admin@12345`
+- Password: `Admin123`
 
 ### 7) Run locally
 ```

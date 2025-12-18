@@ -11,7 +11,7 @@ interface AuthContextValue {
   user: UserProfile | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  login: (phone: string, password: string) => Promise<UserProfile>;
+  login: (identifier: string, password: string) => Promise<UserProfile>;
   logout: () => Promise<void>;
   registerCustomer: (payload: { name: string; email?: string; phone: string }) => Promise<RegisterResponse>;
 }
@@ -37,8 +37,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refresh();
   }, []);
 
-  const login = async (phone: string, password: string) => {
-    const data = await apiPost<{ user: UserProfile }>("/api/auth/login", { phone, password });
+  const login = async (identifier: string, password: string) => {
+    const data = await apiPost<{ user: UserProfile }>("/api/auth/login", { identifier, password });
     setUser(data.user);
     return data.user;
   };

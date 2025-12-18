@@ -23,6 +23,7 @@ type UserRecord = {
   name: string;
   email: string | null;
   phone: string;
+  username: string | null;
   must_change_password: number;
   is_active: number;
 };
@@ -203,6 +204,7 @@ const buildUserProfile = async (db: D1Database, user: UserRecord) => {
     name: user.name,
     email: user.email,
     phone: user.phone,
+    username: user.username ?? user.phone,
     points,
     badge,
     discountPercent: badge.discountPercent,
@@ -223,7 +225,7 @@ const getSessionUser = async (c: any) => {
     .first<{ user_id: string; expires_at: string }>();
   if (!session) return null;
   const user = await c.env.DB.prepare(
-    "SELECT id, role, name, email, phone, must_change_password, is_active FROM users WHERE id = ? AND is_active = 1"
+    "SELECT id, role, name, email, phone, username, must_change_password, is_active FROM users WHERE id = ? AND is_active = 1"
   )
     .bind(session.user_id)
     .first<UserRecord>();
@@ -331,9 +333,9 @@ app.post("/api/auth/register-customer", async (c) => {
     const userId = crypto.randomUUID();
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      "INSERT INTO users (id, role, name, email, phone, password_hash, password_salt, must_change_password, created_at, updated_at, is_active) VALUES (?, 'customer', ?, ?, ?, ?, ?, 0, ?, ?, 1)"
+      "INSERT INTO users (id, role, name, email, phone, username, password_hash, password_salt, must_change_password, created_at, updated_at, is_active) VALUES (?, 'customer', ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)"
     )
-      .bind(userId, data.name, data.email || null, data.phone, hash, salt, now, now)
+      .bind(userId, data.name, data.email || null, data.phone, data.phone, hash, salt, now, now)
       .run();
     await c.env.DB.prepare("INSERT INTO user_points (user_id, points_total, updated_at) VALUES (?, 0, ?)")
       .bind(userId, now)
@@ -349,7 +351,7 @@ app.post("/api/auth/register-customer", async (c) => {
       .run();
 
     const user = await c.env.DB.prepare(
-      "SELECT id, role, name, email, phone, must_change_password, is_active FROM users WHERE id = ?"
+      "SELECT id, role, name, email, phone, username, must_change_password, is_active FROM users WHERE id = ?"
     )
       .bind(userId)
       .first<UserRecord>();
@@ -364,19 +366,25 @@ app.post("/api/auth/register-customer", async (c) => {
 
 app.post("/api/auth/login", async (c) => {
   try {
-    const schema = z.object({
-      phone: z.string().regex(/^\d{10,15}$/),
-      password: z.string().min(4)
-    });
+    const schema = z
+      .object({
+        identifier: z.string().min(1).optional(),
+        phone: z.string().min(1).optional(),
+        password: z.string().min(4)
+      })
+      .refine((data) => Boolean(data.identifier || data.phone), {
+        message: "Identifier is required"
+      });
     const data = await parseJson(c.req.raw, schema);
+    const identifier = (data.identifier ?? data.phone ?? "").trim();
     const ip = getClientIp(c.req.raw);
     if (isRateLimited(ip)) {
       return c.json({ error: "Too many attempts. Please wait." }, 429);
     }
     const user = await c.env.DB.prepare(
-      "SELECT id, role, name, email, phone, password_hash, password_salt, must_change_password, is_active FROM users WHERE phone = ? AND is_active = 1"
+      "SELECT id, role, name, email, phone, username, password_hash, password_salt, must_change_password, is_active FROM users WHERE (phone = ? OR username = ?) AND is_active = 1"
     )
-      .bind(data.phone)
+      .bind(identifier, identifier)
       .first<any>();
     if (!user) {
       recordLoginAttempt(ip);
@@ -1053,7 +1061,7 @@ app.get("/api/admin/users", requireRole(["admin", "manager"]), async (c) => {
   const pageSize = Math.min(Number(c.req.query("pageSize") ?? 20), 200);
   const offset = (page - 1) * pageSize;
   const items = await c.env.DB.prepare(
-    "SELECT id, role, name, email, phone, must_change_password, is_active FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    "SELECT id, role, name, email, phone, username, must_change_password, is_active FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?"
   )
     .bind(pageSize, offset)
     .all();
@@ -1068,17 +1076,19 @@ app.post("/api/admin/users", requireRole(["admin", "manager"]), async (c) => {
       phone: z.string().regex(/^\d{10,15}$/),
       email: z.string().email().optional().or(z.literal("")),
       role: z.enum(["admin", "manager", "chef", "employee", "customer"]),
-      password: z.string().min(4)
+      password: z.string().min(4),
+      username: z.string().min(3).optional()
     });
     const data = await parseJson(c.req.raw, schema);
+    const username = (data.username ?? data.phone).trim();
     const salt = generateSalt();
     const hash = await hashPassword(data.password, salt, c.env.PASSWORD_PEPPER);
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      "INSERT INTO users (id, role, name, email, phone, password_hash, password_salt, must_change_password, created_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)"
+      "INSERT INTO users (id, role, name, email, phone, username, password_hash, password_salt, must_change_password, created_at, updated_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)"
     )
-      .bind(id, data.role, data.name, data.email || null, data.phone, hash, salt, now, now)
+      .bind(id, data.role, data.name, data.email || null, data.phone, username, hash, salt, now, now)
       .run();
     await c.env.DB.prepare("INSERT INTO user_points (user_id, points_total, updated_at) VALUES (?, 0, ?)")
       .bind(id, now)
@@ -1098,14 +1108,24 @@ app.put("/api/admin/users/:id", requireRole(["admin", "manager"]), async (c) => 
       name: z.string().optional(),
       email: z.string().email().optional(),
       phone: z.string().regex(/^\d{10,15}$/).optional(),
+      username: z.string().min(3).optional(),
       is_active: z.number().int().optional()
     });
     const data = await parseJson(c.req.raw, schema);
     const id = c.req.param("id");
     await c.env.DB.prepare(
-      "UPDATE users SET role = COALESCE(?, role), name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), is_active = COALESCE(?, is_active), updated_at = ? WHERE id = ?"
+      "UPDATE users SET role = COALESCE(?, role), name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), username = COALESCE(?, username), is_active = COALESCE(?, is_active), updated_at = ? WHERE id = ?"
     )
-      .bind(data.role ?? null, data.name ?? null, data.email ?? null, data.phone ?? null, data.is_active ?? null, new Date().toISOString(), id)
+      .bind(
+        data.role ?? null,
+        data.name ?? null,
+        data.email ?? null,
+        data.phone ?? null,
+        data.username ?? null,
+        data.is_active ?? null,
+        new Date().toISOString(),
+        id
+      )
       .run();
     const user = c.get("user") as UserRecord;
     await insertAuditLog(c.env.DB, user.id, "UPDATE", "user", id, data);
