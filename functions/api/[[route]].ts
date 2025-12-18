@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { handle } from "hono/cloudflare-pages";
 import { z } from "zod";
 
 interface Bindings {
@@ -1247,5 +1248,5 @@ app.post("/api/admin/settings/discounts", requireRole(["admin", "manager"]), asy
   }
 });
 
-export const onRequest = app.fetch;
+export const onRequest = handle(app);
 export default app;
