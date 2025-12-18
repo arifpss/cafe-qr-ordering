@@ -1,0 +1,63 @@
+{
+  "appName": "Cafe QR Ordering Webapp",
+  "stack": {
+    "frontend": ["React", "Vite", "TypeScript", "Tailwind"],
+    "backend": ["Cloudflare Pages Functions", "Hono"],
+    "database": ["Cloudflare D1"]
+  },
+  "directories": {
+    "frontend": "src",
+    "functions": "functions/api",
+    "migrations": "migrations",
+    "scripts": "scripts",
+    "context": "context"
+  },
+  "scripts": {
+    "dev": "npm run build && wrangler pages dev dist",
+    "build": "vite build",
+    "preview": "wrangler pages dev dist",
+    "cf:init": "node scripts/cf-init.mjs",
+    "cf:migrate:local": "node scripts/cf-migrate.mjs --local",
+    "cf:migrate:remote": "node scripts/cf-migrate.mjs --remote",
+    "cf:seed": "node scripts/cf-seed.mjs",
+    "cf:secrets": "node scripts/cf-secrets.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "envVars": [
+    "SESSION_SECRET",
+    "PASSWORD_PEPPER",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_REDIRECT_URL"
+  ],
+  "endpoints": [
+    "POST /api/auth/register-customer",
+    "POST /api/auth/login",
+    "POST /api/auth/logout",
+    "GET /api/auth/me",
+    "POST /api/auth/change-password",
+    "GET /api/auth/google/start",
+    "GET /api/auth/google/callback",
+    "GET /api/menu",
+    "GET /api/products",
+    "POST /api/orders",
+    "GET /api/orders/current",
+    "GET /api/orders/history",
+    "GET /api/orders/:id",
+    "POST /api/orders/:id/review",
+    "GET /api/staff/orders",
+    "POST /api/staff/orders/:id/accept",
+    "POST /api/staff/orders/:id/status",
+    "CRUD /api/admin/categories",
+    "CRUD /api/admin/products",
+    "CRUD /api/admin/tables",
+    "CRUD /api/admin/users",
+    "GET /api/admin/reports/sales",
+    "GET /api/admin/reports/best-items",
+    "GET /api/admin/reports/badges",
+    "GET /api/admin/leaderboard",
+    "GET/POST /api/admin/settings/theme",
+    "GET/POST /api/admin/settings/discounts"
+  ],
+  "roles": ["customer", "admin", "manager", "chef", "employee"]
+}
