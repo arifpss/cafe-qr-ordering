@@ -11,19 +11,36 @@ export const CustomerProfilePage: React.FC = () => {
   const { user, refresh } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     const load = async () => {
-      await refresh();
-      const data = await apiFetch<{ orders: Order[] }>("/api/orders/history");
-      setOrders(data.orders);
-      setLoading(false);
+      try {
+        await refresh();
+        const data = await apiFetch<{ orders: Order[] }>("/api/orders/history");
+        if (!active) return;
+        setOrders(data.orders);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Unable to load profile");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
     };
     load();
+    return () => {
+      active = false;
+    };
   }, [refresh]);
 
   if (!user || loading) {
     return <div className="py-12 text-center text-[var(--text-muted)]">Loading...</div>;
+  }
+  if (error) {
+    return <div className="py-12 text-center text-[var(--text-muted)]">{error}</div>;
   }
 
   return (

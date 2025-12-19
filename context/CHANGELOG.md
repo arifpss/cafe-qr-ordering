@@ -5,6 +5,11 @@
 - Update default admin credentials to username `admin` and password `Admin123`
 - Fix Cloudflare Pages Functions adapter for Hono routing
 
+## 0.1.2
+- Add table QR generator in admin dashboard
+- Restrict customer profile to customers and add error handling
+- Role-based redirect after login
+
 ## 0.1.0
 - Initial scaffold with customer, staff, and admin UI flows
 - Hono API with auth, orders, menu, and reporting

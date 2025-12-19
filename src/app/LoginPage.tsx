@@ -6,6 +6,7 @@ import { Input } from "../components/Input";
 import { apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import type { UserRole } from "../lib/types";
 
 export const LoginPage: React.FC = () => {
   const { t } = useI18n();
@@ -19,6 +20,13 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const getRoleRedirect = (role: UserRole) => {
+    if (role === "admin" || role === "manager") return "/admin";
+    if (role === "chef") return "/staff/kitchen";
+    if (role === "employee") return "/staff/frontdesk";
+    return "/profile";
+  };
+
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -30,7 +38,7 @@ export const LoginPage: React.FC = () => {
         setSuccess(t("mustChangePassword"));
         return;
       }
-      navigate("/");
+      navigate(getRoleRedirect(profile.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     }

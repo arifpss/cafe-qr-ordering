@@ -22,7 +22,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <NavLink to="/leaderboard" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
               {t("leaderboard")}
             </NavLink>
-            {user && (
+            {user?.role === "customer" && (
               <NavLink to="/profile" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
                 {t("profile")}
               </NavLink>

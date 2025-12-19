@@ -5,6 +5,7 @@ import { Input } from "../components/Input";
 import { apiFetch, apiPost } from "../lib/api";
 import { useTheme } from "../lib/theme";
 import type { Category, Product, ThemeName } from "../lib/types";
+import qrcode from "qrcode-generator";
 
 interface Paginated<T> {
   items: T[];
@@ -29,17 +30,36 @@ interface AdminUser {
   is_active?: number;
 }
 
+interface AdminTable {
+  id: string;
+  location_id: string;
+  code: string;
+  label: string;
+  is_active?: number;
+}
+
+interface AdminLocation {
+  id: string;
+  name: string;
+  address?: string | null;
+  is_active?: number;
+}
+
 export const AdminDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("products");
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [tables, setTables] = useState<AdminTable[]>([]);
+  const [locations, setLocations] = useState<AdminLocation[]>([]);
   const [badges, setBadges] = useState<BadgeLevel[]>([]);
   const [reportRange, setReportRange] = useState("daily");
   const [reports, setReports] = useState<{ period: string; total: number }[]>([]);
   const [badgeDistribution, setBadgeDistribution] = useState<{ key: string; label: string; count: number }[]>([]);
   const [bestItems, setBestItems] = useState<{ name: string; qty: number }[]>([]);
   const { theme, setTheme, refreshTheme } = useTheme();
+  const [origin, setOrigin] = useState("");
+  const [copiedTable, setCopiedTable] = useState<string | null>(null);
 
   const [categoryForm, setCategoryForm] = useState({ id: "", name_en: "", name_bn: "", slug: "", sort_order: 0 });
   const [productForm, setProductForm] = useState({
@@ -58,6 +78,7 @@ export const AdminDashboardPage: React.FC = () => {
     media_video_url: ""
   });
   const [userForm, setUserForm] = useState({ name: "", phone: "", email: "", role: "employee", password: "" });
+  const [tableForm, setTableForm] = useState({ id: "", location_id: "", code: "", label: "" });
 
   const loadCategories = async () => {
     const data = await apiFetch<Paginated<Category>>("/api/admin/categories?page=1&pageSize=100");
@@ -72,6 +93,16 @@ export const AdminDashboardPage: React.FC = () => {
   const loadUsers = async () => {
     const data = await apiFetch<Paginated<AdminUser>>("/api/admin/users?page=1&pageSize=200");
     setUsers(data.items);
+  };
+
+  const loadTables = async () => {
+    const data = await apiFetch<{ items: AdminTable[] }>("/api/admin/tables");
+    setTables(data.items);
+  };
+
+  const loadLocations = async () => {
+    const data = await apiFetch<{ items: AdminLocation[] }>("/api/admin/locations");
+    setLocations(data.items);
   };
 
   const loadBadges = async () => {
@@ -104,6 +135,8 @@ export const AdminDashboardPage: React.FC = () => {
     loadCategories();
     loadProducts();
     loadUsers();
+    loadTables();
+    loadLocations();
     loadBadges();
     refreshTheme();
     loadBadgeDistribution();
@@ -111,10 +144,22 @@ export const AdminDashboardPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!origin && typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
+  }, [origin]);
+
+  useEffect(() => {
     if (!productForm.category_id && categories.length > 0) {
       setProductForm((prev) => ({ ...prev, category_id: categories[0].id }));
     }
   }, [categories, productForm.category_id]);
+
+  useEffect(() => {
+    if (!tableForm.location_id && locations.length > 0) {
+      setTableForm((prev) => ({ ...prev, location_id: locations[0].id }));
+    }
+  }, [locations, tableForm.location_id]);
 
   useEffect(() => {
     loadReports();
@@ -173,6 +218,25 @@ export const AdminDashboardPage: React.FC = () => {
     loadUsers();
   };
 
+  const handleTableSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const payload = {
+      location_id: tableForm.location_id,
+      code: tableForm.code.trim(),
+      label: tableForm.label.trim()
+    };
+    if (tableForm.id) {
+      await apiFetch(`/api/admin/tables/${tableForm.id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      await apiPost("/api/admin/tables", payload);
+    }
+    setTableForm({ id: "", location_id: locations[0]?.id ?? "", code: "", label: "" });
+    loadTables();
+  };
+
   const updateTheme = async (next: ThemeName) => {
     setTheme(next);
     await apiPost("/api/admin/settings/theme", { theme: next });
@@ -184,10 +248,49 @@ export const AdminDashboardPage: React.FC = () => {
     await apiPost("/api/admin/settings/discounts", { badges: updated });
   };
 
+  const getTableUrl = (code: string) => {
+    if (!origin) return "";
+    return `${origin}/t/${code}`;
+  };
+
+  const qrMap = useMemo(() => {
+    if (!origin) return new Map<string, string>();
+    const map = new Map<string, string>();
+    tables.forEach((table) => {
+      const url = `${origin}/t/${table.code}`;
+      const qr = qrcode(0, "M");
+      qr.addData(url);
+      qr.make();
+      map.set(table.id, qr.createSvgTag({ scalable: true, cellSize: 4, margin: 1 }));
+    });
+    return map;
+  }, [tables, origin]);
+
+  const handleCopyLink = async (code: string) => {
+    const url = getTableUrl(code);
+    if (!url || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(url);
+    setCopiedTable(code);
+    setTimeout(() => setCopiedTable(null), 1200);
+  };
+
+  const handleDownloadQr = (table: AdminTable) => {
+    const svg = qrMap.get(table.id);
+    if (!svg) return;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${table.code}.svg`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const tabs = useMemo(
     () => [
       { id: "products", label: "Products" },
       { id: "categories", label: "Categories" },
+      { id: "tables", label: "Tables" },
       { id: "users", label: "Users" },
       { id: "reports", label: "Reports" },
       { id: "settings", label: "Settings" }
@@ -346,6 +449,103 @@ export const AdminDashboardPage: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === "tables" && (
+        <div className="grid gap-4 lg:grid-cols-[1fr_2fr]">
+          <Card>
+            <h3 className="font-display text-lg">Create table</h3>
+            <form className="space-y-2" onSubmit={handleTableSubmit}>
+              <label className="text-sm text-[var(--text-muted)]">
+                Location
+                <select
+                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                  value={tableForm.location_id}
+                  onChange={(event) => setTableForm({ ...tableForm, location_id: event.target.value })}
+                >
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Input label="Label" value={tableForm.label} onChange={(event) => setTableForm({ ...tableForm, label: event.target.value })} />
+              <Input label="Code" value={tableForm.code} onChange={(event) => setTableForm({ ...tableForm, code: event.target.value })} />
+              <Button type="submit">Save</Button>
+            </form>
+          </Card>
+          <Card className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-display text-lg">Table QR codes</h3>
+              <span className="text-xs text-[var(--text-muted)]">{origin || "Open in browser to generate QR"}</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {tables.map((table) => {
+                const url = origin ? `${origin}/t/${table.code}` : "";
+                const qr = qrMap.get(table.id);
+                return (
+                  <div key={table.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{table.label}</p>
+                        <p className="text-xs text-[var(--text-muted)]">{table.code}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            setTableForm({
+                              id: table.id,
+                              location_id: table.location_id,
+                              code: table.code,
+                              label: table.label
+                            })
+                          }
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={async () => {
+                            await apiFetch(`/api/admin/tables/${table.id}`, {
+                              method: "PUT",
+                              body: JSON.stringify({ is_active: 0 })
+                            });
+                            loadTables();
+                          }}
+                        >
+                          Deactivate
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-center rounded-xl bg-[var(--surface)] p-2">
+                      {qr ? (
+                        <div className="h-28 w-28" dangerouslySetInnerHTML={{ __html: qr }} />
+                      ) : (
+                        <p className="text-xs text-[var(--text-muted)]">QR unavailable</p>
+                      )}
+                    </div>
+                    <p className="mt-2 break-all text-xs text-[var(--text-muted)]">{url || "Set base URL to generate QR."}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button variant="outline" onClick={() => handleCopyLink(table.code)} disabled={!url}>
+                        {copiedTable === table.code ? "Copied" : "Copy link"}
+                      </Button>
+                      <Button variant="outline" onClick={() => handleDownloadQr(table)} disabled={!qr}>
+                        Download QR
+                      </Button>
+                      {url && (
+                        <a className="text-xs font-semibold text-[var(--primary)]" href={url} target="_blank" rel="noreferrer">
+                          Open
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </Card>
         </div>

@@ -50,6 +50,7 @@
     "POST /api/staff/orders/:id/status",
     "CRUD /api/admin/categories",
     "CRUD /api/admin/products",
+    "GET /api/admin/locations",
     "CRUD /api/admin/tables",
     "CRUD /api/admin/users",
     "GET /api/admin/reports/sales",

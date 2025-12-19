@@ -1008,6 +1008,13 @@ app.delete("/api/admin/products/:id", requireRole(["admin", "manager"]), async (
   return c.json({ ok: true });
 });
 
+app.get("/api/admin/locations", requireRole(["admin", "manager"]), async (c) => {
+  const rows = await c.env.DB.prepare(
+    "SELECT id, name, address, is_active, created_at FROM locations ORDER BY created_at DESC"
+  ).all();
+  return c.json({ items: rows.results });
+});
+
 app.get("/api/admin/tables", requireRole(["admin", "manager"]), async (c) => {
   const rows = await c.env.DB.prepare("SELECT * FROM tables ORDER BY label").all();
   return c.json({ items: rows.results });
