@@ -16,7 +16,7 @@ interface CartItem {
 
 export const CustomerOrderPage: React.FC = () => {
   const { tableCode } = useParams<{ tableCode: string }>();
-  const { user, registerCustomer } = useAuth();
+  const { user, registerCustomer, loginGuest } = useAuth();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [menu, setMenu] = useState<MenuResponse | null>(null);
@@ -28,9 +28,10 @@ export const CustomerOrderPage: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<Record<string, CartItem>>({});
   const [notes, setNotes] = useState("");
-  const [registerState, setRegisterState] = useState({ name: "", email: "", phone: "" });
+  const [registerState, setRegisterState] = useState({ name: "", email: "", phone: "", password: "" });
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [authChoice, setAuthChoice] = useState<"guest" | "create" | "login" | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -104,14 +105,29 @@ export const CustomerOrderPage: React.FC = () => {
     try {
       const data = await registerCustomer(registerState);
       setTempPassword(data.tempPassword);
+      setAuthChoice(null);
     } catch (err) {
       setRegisterError(err instanceof Error ? err.message : "Unable to register");
+    }
+  };
+
+  const handleGuest = async () => {
+    setRegisterError(null);
+    try {
+      await loginGuest();
+      setAuthChoice("guest");
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : "Unable to continue as guest");
     }
   };
 
   const handleOrder = async () => {
     if (!tableCode) return;
     if (cartItems.length === 0) return;
+    if (!user) {
+      setOrderError(t("loginRequiredToOrder"));
+      return;
+    }
     setOrderError(null);
     setPlacingOrder(true);
     try {
@@ -163,16 +179,33 @@ export const CustomerOrderPage: React.FC = () => {
 
         {!user && (
           <Card className="space-y-4">
-            <h3 className="font-display text-xl">{t("createAccount")}</h3>
-            <form className="space-y-3" onSubmit={handleRegister}>
-              <Input label={t("name")} value={registerState.name} onChange={(event) => setRegisterState({ ...registerState, name: event.target.value })} />
-              <Input label={t("email")} value={registerState.email} onChange={(event) => setRegisterState({ ...registerState, email: event.target.value })} />
-              <Input label={t("phone")} value={registerState.phone} onChange={(event) => setRegisterState({ ...registerState, phone: event.target.value })} />
-              {registerError && <p className="text-xs text-red-400">{registerError}</p>}
-              <Button type="submit" className="w-full">
-                {t("register")}
+            <h3 className="font-display text-xl">{t("getStarted")}</h3>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Button onClick={handleGuest}>{t("continueAsGuest")}</Button>
+              <Button variant="outline" onClick={() => setAuthChoice("create")}>
+                {t("createAccount")}
               </Button>
-            </form>
+              <Button variant="ghost" onClick={() => navigate("/login")}>
+                {t("login")}
+              </Button>
+            </div>
+            {authChoice === "create" && (
+              <form className="space-y-3" onSubmit={handleRegister}>
+                <Input label={t("name")} value={registerState.name} onChange={(event) => setRegisterState({ ...registerState, name: event.target.value })} />
+                <Input label={t("email")} value={registerState.email} onChange={(event) => setRegisterState({ ...registerState, email: event.target.value })} />
+                <Input label={t("phone")} value={registerState.phone} onChange={(event) => setRegisterState({ ...registerState, phone: event.target.value })} />
+                <Input
+                  label={t("passwordOptional")}
+                  type="password"
+                  value={registerState.password}
+                  onChange={(event) => setRegisterState({ ...registerState, password: event.target.value })}
+                />
+                {registerError && <p className="text-xs text-red-400">{registerError}</p>}
+                <Button type="submit" className="w-full">
+                  {t("register")}
+                </Button>
+              </form>
+            )}
             {tempPassword && (
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-xs text-[var(--text-muted)]">
                 Username (phone): <span className="text-[var(--primary)]">{registerState.phone}</span>
@@ -180,7 +213,7 @@ export const CustomerOrderPage: React.FC = () => {
                 Temporary password: <span className="text-[var(--primary)]">{tempPassword}</span>
               </div>
             )}
-            <p className="text-xs text-[var(--text-muted)]">{t("alreadyHaveAccount")} <a className="text-[var(--primary)]" href="/login">{t("login")}</a></p>
+            {registerError && !authChoice && <p className="text-xs text-red-400">{registerError}</p>}
           </Card>
         )}
 

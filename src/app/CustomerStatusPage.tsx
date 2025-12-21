@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { Input } from "../components/Input";
 import { apiFetch, apiPost } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { playTing } from "../lib/sound";
 import type { Order } from "../lib/types";
 
 interface OrderResponse {
@@ -20,6 +21,8 @@ export const CustomerStatusPage: React.FC = () => {
   const [rating, setRating] = useState(10);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const etaAlertedRef = useRef(false);
 
   const fetchOrder = async () => {
     if (!orderId) return;
@@ -38,11 +41,34 @@ export const CustomerStatusPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [orderId]);
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const etaRemaining = useMemo(() => {
     if (!order?.eta_at) return null;
-    const diffMs = new Date(order.eta_at).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diffMs / 60000));
-  }, [order?.eta_at]);
+    const diffMs = new Date(order.eta_at).getTime() - now;
+    return Math.max(0, Math.ceil(diffMs / 1000));
+  }, [order?.eta_at, now]);
+
+  useEffect(() => {
+    if (!order?.eta_at || etaRemaining === null) return;
+    if (etaRemaining <= 0 && !etaAlertedRef.current && !["READY", "SERVED"].includes(order.status)) {
+      playTing();
+      etaAlertedRef.current = true;
+    }
+    if (etaRemaining > 0) {
+      etaAlertedRef.current = false;
+    }
+  }, [etaRemaining, order?.eta_at, order?.status]);
+
+  const etaLabel = useMemo(() => {
+    if (etaRemaining === null) return null;
+    const minutes = Math.floor(etaRemaining / 60);
+    const seconds = etaRemaining % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  }, [etaRemaining]);
 
   const submitReview = async () => {
     if (!orderId) return;
@@ -73,7 +99,7 @@ export const CustomerStatusPage: React.FC = () => {
           <span className="rounded-full border border-[var(--border)] px-3 py-1">{order.status}</span>
           {order.eta_minutes && (
             <span className="rounded-full border border-[var(--border)] px-3 py-1">
-              {t("eta")}: {etaRemaining ?? order.eta_minutes} {t("minutes")}
+              {t("eta")}: {etaLabel ?? `${order.eta_minutes} ${t("minutes")}`}
             </span>
           )}
         </div>

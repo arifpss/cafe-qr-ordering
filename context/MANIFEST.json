@@ -33,6 +33,7 @@
   "endpoints": [
     "POST /api/auth/register-customer",
     "POST /api/auth/login",
+    "POST /api/auth/guest",
     "POST /api/auth/logout",
     "GET /api/auth/me",
     "POST /api/auth/change-password",
@@ -48,6 +49,8 @@
     "GET /api/staff/orders",
     "POST /api/staff/orders/:id/accept",
     "POST /api/staff/orders/:id/status",
+    "PUT /api/staff/orders/:id/items",
+    "PUT /api/staff/customers/:id",
     "CRUD /api/admin/categories",
     "CRUD /api/admin/products",
     "GET /api/admin/locations",

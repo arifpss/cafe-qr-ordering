@@ -319,7 +319,8 @@ app.post("/api/auth/register-customer", async (c) => {
     const schema = z.object({
       name: z.string().min(1),
       email: z.string().email().optional().or(z.literal("")),
-      phone: z.string().regex(/^\d{10,15}$/)
+      phone: z.string().regex(/^\d{10,15}$/),
+      password: z.string().min(3).optional().or(z.literal(""))
     });
     const data = await parseJson(c.req.raw, schema);
     const existing = await c.env.DB.prepare("SELECT id FROM users WHERE phone = ?")
@@ -328,7 +329,8 @@ app.post("/api/auth/register-customer", async (c) => {
     if (existing) {
       return c.json({ error: "Phone already registered" }, 409);
     }
-    const password = generateTempPassword();
+    const providedPassword = data.password && data.password.trim().length > 0 ? data.password.trim() : null;
+    const password = providedPassword ?? generateTempPassword();
     const salt = generateSalt();
     const hash = await hashPassword(password, salt, c.env.PASSWORD_PEPPER);
     const userId = crypto.randomUUID();
@@ -359,9 +361,53 @@ app.post("/api/auth/register-customer", async (c) => {
 
     setSessionCookie(c, token);
     const profile = await buildUserProfile(c.env.DB, user!);
-    return c.json({ user: profile, tempPassword: password });
+    return c.json({ user: profile, tempPassword: providedPassword ? null : password });
   } catch (error) {
     return c.json({ error: "Invalid registration", details: String(error) }, 400);
+  }
+});
+
+app.post("/api/auth/guest", async (c) => {
+  try {
+    const existing = c.get("user") as UserRecord | undefined;
+    if (existing) {
+      const profile = await buildUserProfile(c.env.DB, existing);
+      return c.json({ user: profile, guest: existing.phone.startsWith("GUEST-") });
+    }
+    const now = new Date().toISOString();
+    const userId = crypto.randomUUID();
+    const guestToken = `GUEST-${userId.slice(0, 8)}`;
+    const salt = generateSalt();
+    const hash = await hashPassword(guestToken, salt, c.env.PASSWORD_PEPPER);
+    await c.env.DB.prepare(
+      "INSERT INTO users (id, role, name, email, phone, username, password_hash, password_salt, must_change_password, created_at, updated_at, is_active) VALUES (?, 'customer', ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)"
+    )
+      .bind(userId, "Guest", null, guestToken, guestToken, hash, salt, now, now)
+      .run();
+    await c.env.DB.prepare("INSERT INTO user_points (user_id, points_total, updated_at) VALUES (?, 0, ?)")
+      .bind(userId, now)
+      .run();
+
+    const token = generateToken();
+    const tokenHash = await hashToken(token, c.env.SESSION_SECRET);
+    const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await c.env.DB.prepare(
+      "INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+      .bind(crypto.randomUUID(), userId, tokenHash, expiresAt, now, now)
+      .run();
+
+    const user = await c.env.DB.prepare(
+      "SELECT id, role, name, email, phone, username, must_change_password, is_active FROM users WHERE id = ?"
+    )
+      .bind(userId)
+      .first<UserRecord>();
+
+    setSessionCookie(c, token);
+    const profile = await buildUserProfile(c.env.DB, user!);
+    return c.json({ user: profile, guest: true });
+  } catch (error) {
+    return c.json({ error: "Unable to start guest session", details: String(error) }, 400);
   }
 });
 
@@ -371,7 +417,7 @@ app.post("/api/auth/login", async (c) => {
       .object({
         identifier: z.string().min(1).optional(),
         phone: z.string().min(1).optional(),
-        password: z.string().min(4)
+        password: z.string().min(3)
       })
       .refine((data) => Boolean(data.identifier || data.phone), {
         message: "Identifier is required"
@@ -437,8 +483,8 @@ app.get("/api/auth/me", async (c) => {
 app.post("/api/auth/change-password", requireAuth, async (c) => {
   try {
     const schema = z.object({
-      currentPassword: z.string().min(4),
-      newPassword: z.string().min(6)
+      currentPassword: z.string().min(3),
+      newPassword: z.string().min(3)
     });
     const data = await parseJson(c.req.raw, schema);
     const user = c.get("user") as UserRecord;
@@ -727,7 +773,7 @@ app.get("/api/staff/orders", requireRole(["chef", "employee", "manager", "admin"
   const statuses = statusParam ? statusParam.split(",") : ["PLACED"];
   const placeholders = statuses.map(() => "?").join(",");
   const orders = await c.env.DB.prepare(
-    `SELECT orders.*, tables.label as table_label FROM orders JOIN tables ON tables.id = orders.table_id WHERE orders.status IN (${placeholders}) ORDER BY orders.placed_at ASC`
+    `SELECT orders.*, tables.label as table_label, users.name as customer_name, users.phone as customer_phone, users.id as customer_id FROM orders JOIN tables ON tables.id = orders.table_id LEFT JOIN users ON users.id = orders.customer_id WHERE orders.status IN (${placeholders}) ORDER BY orders.placed_at ASC`
   )
     .bind(...statuses)
     .all();
@@ -823,6 +869,133 @@ app.post("/api/staff/orders/:id/status", requireRole(["chef", "employee", "manag
     return c.json({ ok: true });
   } catch (error) {
     return c.json({ error: "Invalid request", details: String(error) }, 400);
+  }
+});
+
+app.put("/api/staff/orders/:id/items", requireRole(["employee", "manager", "admin"]), async (c) => {
+  try {
+    const schema = z.object({
+      items: z.array(z.object({ productId: z.string().min(1), qty: z.number().int().min(1).max(20) })).min(1)
+    });
+    const data = await parseJson(c.req.raw, schema);
+    const orderId = c.req.param("id");
+    const order = await c.env.DB.prepare("SELECT id, status, customer_id FROM orders WHERE id = ?")
+      .bind(orderId)
+      .first<any>();
+    if (!order) {
+      return c.json({ error: "Order not found" }, 404);
+    }
+    if (["SERVED", "CANCELLED"].includes(order.status)) {
+      return c.json({ error: "Order cannot be adjusted" }, 400);
+    }
+    const ids = data.items.map((item) => item.productId);
+    const placeholders = ids.map(() => "?").join(",");
+    const productRows = await c.env.DB.prepare(`SELECT * FROM products WHERE id IN (${placeholders}) AND is_active = 1`)
+      .bind(...ids)
+      .all();
+    const productMap = new Map(productRows.results.map((p: any) => [p.id, p]));
+    const items = data.items.map((item) => {
+      const product = productMap.get(item.productId);
+      if (!product) throw new Error("Invalid product");
+      return { product, qty: item.qty };
+    });
+    const subtotal = items.reduce((sum, item) => sum + item.product.price_tk * item.qty, 0);
+    let discountPercent = 0;
+    if (order.customer_id) {
+      const points = await getUserPoints(c.env.DB, order.customer_id);
+      const badge = await getBadgeForPoints(c.env.DB, points);
+      discountPercent = badge.discountPercent;
+    }
+    const discountAmount = Math.round((subtotal * discountPercent) / 100);
+    const totalAfter = Math.max(0, subtotal - discountAmount);
+
+    const statements: D1PreparedStatement[] = [];
+    statements.push(
+      c.env.DB.prepare(
+        "UPDATE orders SET total_before_discount_tk = ?, discount_percent_applied = ?, discount_amount_tk = ?, total_after_discount_tk = ?, points_earned = ? WHERE id = ?"
+      ).bind(subtotal, discountPercent, discountAmount, totalAfter, totalAfter, orderId)
+    );
+    statements.push(c.env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId));
+    items.forEach((item) => {
+      statements.push(
+        c.env.DB.prepare(
+          "INSERT INTO order_items (id, order_id, product_id, product_name_snapshot_en, product_name_snapshot_bn, unit_price_snapshot_tk, qty, line_total_tk, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(
+          crypto.randomUUID(),
+          orderId,
+          item.product.id,
+          item.product.name_en,
+          item.product.name_bn,
+          item.product.price_tk,
+          item.qty,
+          item.product.price_tk * item.qty,
+          null
+        )
+      );
+    });
+    await c.env.DB.batch(statements);
+
+    const actor = c.get("user") as UserRecord;
+    await createOrderEvent(c.env.DB, orderId, "ITEMS_ADJUSTED", actor.id, { items: data.items });
+    await insertAuditLog(c.env.DB, actor.id, "UPDATE_ITEMS", "order", orderId, { items: data.items });
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json({ error: "Unable to adjust order", details: String(error) }, 400);
+  }
+});
+
+app.put("/api/staff/customers/:id", requireRole(["employee", "manager", "admin"]), async (c) => {
+  try {
+    const schema = z.object({
+      name: z.string().min(1).optional(),
+      email: z.string().email().optional().or(z.literal("")),
+      phone: z.string().regex(/^\d{10,15}$/).optional(),
+      password: z.string().min(3).optional()
+    });
+    const data = await parseJson(c.req.raw, schema);
+    const userId = c.req.param("id");
+    const existing = await c.env.DB.prepare("SELECT id, role FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ id: string; role: string }>();
+    if (!existing) {
+      return c.json({ error: "Customer not found" }, 404);
+    }
+    if (existing.role !== "customer") {
+      return c.json({ error: "Only customer accounts can be edited here" }, 400);
+    }
+    const updates: string[] = [];
+    const binds: any[] = [];
+    if (data.name) {
+      updates.push("name = ?");
+      binds.push(data.name);
+    }
+    if (data.email !== undefined) {
+      updates.push("email = ?");
+      binds.push(data.email || null);
+    }
+    if (data.phone) {
+      updates.push("phone = ?", "username = ?");
+      binds.push(data.phone, data.phone);
+    }
+    if (data.password) {
+      const salt = generateSalt();
+      const hash = await hashPassword(data.password, salt, c.env.PASSWORD_PEPPER);
+      updates.push("password_hash = ?", "password_salt = ?", "must_change_password = 0");
+      binds.push(hash, salt);
+    }
+    if (!updates.length) {
+      return c.json({ error: "No updates provided" }, 400);
+    }
+    updates.push("updated_at = ?");
+    binds.push(new Date().toISOString(), userId);
+    await c.env.DB.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...binds)
+      .run();
+    const actor = c.get("user") as UserRecord;
+    await insertAuditLog(c.env.DB, actor.id, "UPDATE", "customer", userId, data);
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json({ error: "Unable to update customer", details: String(error) }, 400);
   }
 });
 
@@ -1117,23 +1290,37 @@ app.put("/api/admin/users/:id", requireRole(["admin", "manager"]), async (c) => 
       email: z.string().email().optional(),
       phone: z.string().regex(/^\d{10,15}$/).optional(),
       username: z.string().min(3).optional(),
+      password: z.string().min(3).optional(),
       is_active: z.number().int().optional()
     });
     const data = await parseJson(c.req.raw, schema);
     const id = c.req.param("id");
-    await c.env.DB.prepare(
-      "UPDATE users SET role = COALESCE(?, role), name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), username = COALESCE(?, username), is_active = COALESCE(?, is_active), updated_at = ? WHERE id = ?"
-    )
-      .bind(
-        data.role ?? null,
-        data.name ?? null,
-        data.email ?? null,
-        data.phone ?? null,
-        data.username ?? null,
-        data.is_active ?? null,
-        new Date().toISOString(),
-        id
-      )
+    const updates: string[] = [
+      "role = COALESCE(?, role)",
+      "name = COALESCE(?, name)",
+      "email = COALESCE(?, email)",
+      "phone = COALESCE(?, phone)",
+      "username = COALESCE(?, username)",
+      "is_active = COALESCE(?, is_active)"
+    ];
+    const binds: any[] = [
+      data.role ?? null,
+      data.name ?? null,
+      data.email ?? null,
+      data.phone ?? null,
+      data.username ?? null,
+      data.is_active ?? null
+    ];
+    if (data.password) {
+      const salt = generateSalt();
+      const hash = await hashPassword(data.password, salt, c.env.PASSWORD_PEPPER);
+      updates.push("password_hash = ?", "password_salt = ?", "must_change_password = 0");
+      binds.push(hash, salt);
+    }
+    updates.push("updated_at = ?");
+    binds.push(new Date().toISOString(), id);
+    await c.env.DB.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...binds)
       .run();
     const user = c.get("user") as UserRecord;
     await insertAuditLog(c.env.DB, user.id, "UPDATE", "user", id, data);

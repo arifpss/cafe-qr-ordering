@@ -50,6 +50,9 @@ const translations: Record<Lang, Record<string, string>> = {
     status: "Status",
     reviewOptional: "Comment (optional)",
     alreadyHaveAccount: "Already have an account?",
+    getStarted: "Get started",
+    continueAsGuest: "Continue as guest",
+    passwordOptional: "Password (optional, min 3)",
     register: "Register",
     continue: "Continue",
     menu: "Menu",
@@ -74,7 +77,8 @@ const translations: Record<Lang, Record<string, string>> = {
     markReady: "Mark ready",
     markServed: "Mark served",
     cancel: "Cancel",
-    reviewThanks: "Thanks for your review"
+    reviewThanks: "Thanks for your review",
+    loginRequiredToOrder: "Please login, create an account, or continue as guest to place an order."
   },
   bn: {
     appName: "ক্যাফে কিউআর অর্ডারিং",
@@ -123,6 +127,9 @@ const translations: Record<Lang, Record<string, string>> = {
     status: "স্ট্যাটাস",
     reviewOptional: "কমেন্ট (ঐচ্ছিক)",
     alreadyHaveAccount: "আগে থেকে অ্যাকাউন্ট আছে?",
+    getStarted: "শুরু করুন",
+    continueAsGuest: "গেস্ট হিসেবে চালিয়ে যান",
+    passwordOptional: "পাসওয়ার্ড (ঐচ্ছিক, কমপক্ষে ৩)",
     register: "রেজিস্টার",
     continue: "চালিয়ে যান",
     menu: "মেনু",
@@ -147,7 +154,8 @@ const translations: Record<Lang, Record<string, string>> = {
     markReady: "রেডি করুন",
     markServed: "সার্ভড করুন",
     cancel: "বাতিল",
-    reviewThanks: "রিভিউর জন্য ধন্যবাদ"
+    reviewThanks: "রিভিউর জন্য ধন্যবাদ",
+    loginRequiredToOrder: "অর্ডার করতে লগইন, অ্যাকাউন্ট তৈরি, অথবা গেস্ট হিসেবে চালিয়ে যান।"
   }
 };
 

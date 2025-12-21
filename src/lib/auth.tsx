@@ -4,7 +4,7 @@ import type { UserProfile } from "./types";
 
 interface RegisterResponse {
   user: UserProfile;
-  tempPassword: string;
+  tempPassword: string | null;
 }
 
 interface AuthContextValue {
@@ -12,8 +12,9 @@ interface AuthContextValue {
   loading: boolean;
   refresh: () => Promise<void>;
   login: (identifier: string, password: string) => Promise<UserProfile>;
+  loginGuest: () => Promise<UserProfile>;
   logout: () => Promise<void>;
-  registerCustomer: (payload: { name: string; email?: string; phone: string }) => Promise<RegisterResponse>;
+  registerCustomer: (payload: { name: string; email?: string; phone: string; password?: string }) => Promise<RegisterResponse>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -43,19 +44,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return data.user;
   };
 
+  const loginGuest = async () => {
+    const data = await apiPost<{ user: UserProfile }>("/api/auth/guest", {});
+    setUser(data.user);
+    return data.user;
+  };
+
   const logout = async () => {
     await apiPost("/api/auth/logout", {});
     setUser(null);
   };
 
-  const registerCustomer = async (payload: { name: string; email?: string; phone: string }) => {
+  const registerCustomer = async (payload: { name: string; email?: string; phone: string; password?: string }) => {
     const data = await apiPost<RegisterResponse>("/api/auth/register-customer", payload);
     setUser(data.user);
     return data;
   };
 
   const value = useMemo(
-    () => ({ user, loading, refresh, login, logout, registerCustomer }),
+    () => ({ user, loading, refresh, login, loginGuest, logout, registerCustomer }),
     [user, loading]
   );
 

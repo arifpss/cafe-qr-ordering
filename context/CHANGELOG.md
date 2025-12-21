@@ -10,6 +10,11 @@
 - Restrict customer profile to customers and add error handling
 - Role-based redirect after login
 
+## 0.1.3
+- Add guest auth option and optional password on customer registration
+- Front desk realtime alerts, countdown, and order/customer adjustments
+- Customer ETA countdown with sound notification
+
 ## 0.1.0
 - Initial scaffold with customer, staff, and admin UI flows
 - Hono API with auth, orders, menu, and reporting
