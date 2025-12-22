@@ -880,7 +880,7 @@ app.post("/api/staff/orders/:id/status", requireRole(["chef", "employee", "manag
     await c.env.DB.prepare(`UPDATE orders SET ${updates.join(", ")} WHERE id = ?`)
       .bind(...binds)
       .run();
-    if (data.status === "PAYMENT_RECEIVED") {
+    if (data.status === "PAYMENT_RECEIVED" && order.status !== "PAYMENT_RECEIVED") {
       await c.env.DB.prepare(
         "UPDATE user_points SET points_total = points_total + ?, updated_at = ? WHERE user_id = ?"
       )
