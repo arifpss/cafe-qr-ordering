@@ -31,7 +31,7 @@ export const StaffFrontDeskPage: React.FC = () => {
 
   const loadOrders = async () => {
     const data = await apiFetch<{ orders: StaffOrder[] }>(
-      "/api/staff/orders?status=RECEIVED,PREPARING,SERVING,SERVED,PAYMENT_RECEIVED,CANCELLED"
+      "/api/staff/orders?status=RECEIVED,PREPARING,SERVING"
     );
     const newIds = new Set(data.orders.map((order) => order.id));
     const prevIds = prevIdsRef.current;

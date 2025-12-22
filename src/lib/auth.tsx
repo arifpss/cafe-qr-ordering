@@ -13,6 +13,7 @@ interface AuthContextValue {
   refresh: () => Promise<void>;
   login: (identifier: string, password: string) => Promise<UserProfile>;
   loginGuest: () => Promise<UserProfile>;
+  updateProfile: (payload: { name?: string; email?: string; phone?: string; password?: string }) => Promise<UserProfile>;
   logout: () => Promise<void>;
   registerCustomer: (payload: { name: string; email?: string; phone: string; password?: string }) => Promise<RegisterResponse>;
 }
@@ -50,6 +51,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return data.user;
   };
 
+  const updateProfile = async (payload: { name?: string; email?: string; phone?: string; password?: string }) => {
+    const data = await apiFetch<{ user: UserProfile }>("/api/auth/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+    setUser(data.user);
+    return data.user;
+  };
+
   const logout = async () => {
     await apiPost("/api/auth/logout", {});
     setUser(null);
@@ -62,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const value = useMemo(
-    () => ({ user, loading, refresh, login, loginGuest, logout, registerCustomer }),
+    () => ({ user, loading, refresh, login, loginGuest, updateProfile, logout, registerCustomer }),
     [user, loading]
   );
 

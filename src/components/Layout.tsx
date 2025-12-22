@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
+import { Badge } from "./Badge";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { LanguageToggle } from "./LanguageToggle";
@@ -10,6 +11,19 @@ const navActive = "text-[var(--primary)]";
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
   const { t } = useI18n();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
 
   return (
     <div className="min-h-screen">
@@ -22,11 +36,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <NavLink to="/leaderboard" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
               {t("leaderboard")}
             </NavLink>
-            {user?.role === "customer" && (
-              <NavLink to="/profile" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
-                {t("profile")}
-              </NavLink>
-            )}
             {user?.role === "chef" && (
               <NavLink to="/staff/kitchen" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
                 {t("kitchenView")}
@@ -42,21 +51,48 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {t("admin")}
               </NavLink>
             )}
-            {user?.role === "admin" && (
+            {user && ["admin", "manager", "employee"].includes(user.role) && (
               <NavLink to="/admin/orders" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
                 {t("allOrders")}
               </NavLink>
             )}
+            <LanguageToggle />
             {!user ? (
               <NavLink to="/login" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
                 {t("login")}
               </NavLink>
             ) : (
-              <button onClick={() => logout()} className="text-sm font-medium text-[var(--text-muted)]">
-                {t("logout")}
-              </button>
+              <div className="relative" ref={menuRef}>
+                <button
+                  className="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-left"
+                  onClick={() => setMenuOpen((open) => !open)}
+                >
+                  <div className="text-xs">
+                    <p className="text-sm font-semibold text-[var(--text)]">{user.username ?? user.phone}</p>
+                    <p className="text-[var(--text-muted)]">{user.name}</p>
+                  </div>
+                  <Badge label={user.role === "customer" ? user.badge.displayName : user.role.toUpperCase()} />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2 w-44 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2 text-sm shadow-lg">
+                    <NavLink
+                      to="/profile"
+                      className={({ isActive }) =>
+                        `block rounded-lg px-3 py-2 ${isActive ? "bg-[var(--surface-2)]" : "hover:bg-[var(--surface-2)]"}`
+                      }
+                    >
+                      {t("profile")}
+                    </NavLink>
+                    <button
+                      onClick={() => logout()}
+                      className="mt-1 w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--surface-2)]"
+                    >
+                      {t("logout")}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
-            <LanguageToggle />
           </nav>
         </div>
       </header>

@@ -36,6 +36,7 @@
     "POST /api/auth/guest",
     "POST /api/auth/logout",
     "GET /api/auth/me",
+    "PUT /api/auth/profile",
     "POST /api/auth/change-password",
     "GET /api/auth/google/start",
     "GET /api/auth/google/callback",

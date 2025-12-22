@@ -20,6 +20,11 @@
 - Update order statuses to RECEIVED/PREPARING/SERVING/SERVED/PAYMENT_RECEIVED
 - Front desk dropdown status control with per-order countdown timers
 
+## 0.1.5
+- Add profile editing for all users with self-service updates
+- Front desk shows only active orders; order history page supports editing
+- Add order history access for admin/manager/employee
+
 ## 0.1.0
 - Initial scaffold with customer, staff, and admin UI flows
 - Hono API with auth, orders, menu, and reporting

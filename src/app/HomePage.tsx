@@ -2,10 +2,12 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 
 export const HomePage: React.FC = () => {
   const { t } = useI18n();
+  const { user, logout } = useAuth();
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
@@ -20,9 +22,13 @@ export const HomePage: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Link to="/login">
-            <Button>{t("login")}</Button>
-          </Link>
+          {user ? (
+            <Button onClick={() => logout()}>{t("logout")}</Button>
+          ) : (
+            <Link to="/login">
+              <Button>{t("login")}</Button>
+            </Link>
+          )}
           <Link to="/leaderboard">
             <Button variant="outline">{t("leaderboard")}</Button>
           </Link>

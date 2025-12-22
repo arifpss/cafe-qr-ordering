@@ -480,6 +480,67 @@ app.get("/api/auth/me", async (c) => {
   return c.json({ user: profile });
 });
 
+app.put("/api/auth/profile", requireAuth, async (c) => {
+  try {
+    const schema = z.object({
+      name: z.string().min(1).optional(),
+      email: z.string().email().optional().or(z.literal("")),
+      phone: z.string().regex(/^\d{10,15}$/).optional(),
+      password: z.string().min(3).optional()
+    });
+    const data = await parseJson(c.req.raw, schema);
+    const user = c.get("user") as UserRecord;
+    if (user.phone.startsWith("GUEST-")) {
+      return c.json({ error: "Guest accounts cannot update profile" }, 403);
+    }
+    if (data.phone) {
+      const existing = await c.env.DB.prepare("SELECT id FROM users WHERE phone = ? AND id != ?")
+        .bind(data.phone, user.id)
+        .first();
+      if (existing) {
+        return c.json({ error: "Phone already in use" }, 409);
+      }
+    }
+    const updates: string[] = [];
+    const binds: any[] = [];
+    if (data.name) {
+      updates.push("name = ?");
+      binds.push(data.name);
+    }
+    if (data.email !== undefined) {
+      updates.push("email = ?");
+      binds.push(data.email || null);
+    }
+    if (data.phone) {
+      updates.push("phone = ?", "username = ?");
+      binds.push(data.phone, data.phone);
+    }
+    if (data.password) {
+      const salt = generateSalt();
+      const hash = await hashPassword(data.password, salt, c.env.PASSWORD_PEPPER);
+      updates.push("password_hash = ?", "password_salt = ?", "must_change_password = 0");
+      binds.push(hash, salt);
+    }
+    if (!updates.length) {
+      return c.json({ error: "No updates provided" }, 400);
+    }
+    updates.push("updated_at = ?");
+    binds.push(new Date().toISOString(), user.id);
+    await c.env.DB.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`)
+      .bind(...binds)
+      .run();
+    const updated = await c.env.DB.prepare(
+      "SELECT id, role, name, email, phone, username, must_change_password, is_active FROM users WHERE id = ?"
+    )
+      .bind(user.id)
+      .first<UserRecord>();
+    const profile = await buildUserProfile(c.env.DB, updated!);
+    return c.json({ user: profile });
+  } catch (error) {
+    return c.json({ error: "Unable to update profile", details: String(error) }, 400);
+  }
+});
+
 app.post("/api/auth/change-password", requireAuth, async (c) => {
   try {
     const schema = z.object({
@@ -902,14 +963,13 @@ app.put("/api/staff/orders/:id/items", requireRole(["employee", "manager", "admi
     });
     const data = await parseJson(c.req.raw, schema);
     const orderId = c.req.param("id");
-    const order = await c.env.DB.prepare("SELECT id, status, customer_id FROM orders WHERE id = ?")
+    const order = await c.env.DB.prepare(
+      "SELECT id, status, customer_id, total_after_discount_tk, points_earned FROM orders WHERE id = ?"
+    )
       .bind(orderId)
       .first<any>();
     if (!order) {
       return c.json({ error: "Order not found" }, 404);
-    }
-    if (["SERVED", "CANCELLED"].includes(order.status)) {
-      return c.json({ error: "Order cannot be adjusted" }, 400);
     }
     const ids = data.items.map((item) => item.productId);
     const placeholders = ids.map(() => "?").join(",");
@@ -931,12 +991,14 @@ app.put("/api/staff/orders/:id/items", requireRole(["employee", "manager", "admi
     }
     const discountAmount = Math.round((subtotal * discountPercent) / 100);
     const totalAfter = Math.max(0, subtotal - discountAmount);
+    const oldPoints = Number(order.points_earned ?? order.total_after_discount_tk ?? 0);
+    const newPoints = totalAfter;
 
     const statements: D1PreparedStatement[] = [];
     statements.push(
       c.env.DB.prepare(
         "UPDATE orders SET total_before_discount_tk = ?, discount_percent_applied = ?, discount_amount_tk = ?, total_after_discount_tk = ?, points_earned = ? WHERE id = ?"
-      ).bind(subtotal, discountPercent, discountAmount, totalAfter, totalAfter, orderId)
+      ).bind(subtotal, discountPercent, discountAmount, totalAfter, newPoints, orderId)
     );
     statements.push(c.env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId));
     items.forEach((item) => {
@@ -957,6 +1019,16 @@ app.put("/api/staff/orders/:id/items", requireRole(["employee", "manager", "admi
       );
     });
     await c.env.DB.batch(statements);
+    if (order.status === "PAYMENT_RECEIVED" && order.customer_id) {
+      const delta = newPoints - oldPoints;
+      if (delta !== 0) {
+        await c.env.DB.prepare(
+          "UPDATE user_points SET points_total = points_total + ?, updated_at = ? WHERE user_id = ?"
+        )
+          .bind(delta, new Date().toISOString(), order.customer_id)
+          .run();
+      }
+    }
 
     const actor = c.get("user") as UserRecord;
     await createOrderEvent(c.env.DB, orderId, "ITEMS_ADJUSTED", actor.id, { items: data.items });
@@ -1098,7 +1170,7 @@ app.get("/api/admin/products", requireRole(["admin", "manager"]), async (c) => {
   return c.json({ items: items.results, total: total?.count ?? 0 });
 });
 
-app.get("/api/admin/orders", requireRole(["admin", "manager"]), async (c) => {
+app.get("/api/admin/orders", requireRole(["admin", "manager", "employee"]), async (c) => {
   const page = Number(c.req.query("page") ?? 1);
   const pageSize = Math.min(Number(c.req.query("pageSize") ?? 20), 200);
   const offset = (page - 1) * pageSize;
@@ -1115,10 +1187,30 @@ app.get("/api/admin/orders", requireRole(["admin", "manager"]), async (c) => {
   )
     .bind(...binds, pageSize, offset)
     .all();
+  const orderIds = rows.results.map((order: any) => order.id);
+  let ordersWithItems = rows.results as any[];
+  if (orderIds.length) {
+    const itemPlaceholders = orderIds.map(() => "?").join(",");
+    const items = await c.env.DB.prepare(
+      `SELECT * FROM order_items WHERE order_id IN (${itemPlaceholders})`
+    )
+      .bind(...orderIds)
+      .all();
+    const grouped = new Map<string, any[]>();
+    items.results.forEach((item: any) => {
+      const list = grouped.get(item.order_id) ?? [];
+      list.push(item);
+      grouped.set(item.order_id, list);
+    });
+    ordersWithItems = rows.results.map((order: any) => ({
+      ...order,
+      items: grouped.get(order.id) ?? []
+    }));
+  }
   const totalRow = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM orders ${where}`)
     .bind(...binds)
     .first<{ count: number }>();
-  return c.json({ items: rows.results, total: totalRow?.count ?? 0 });
+  return c.json({ items: ordersWithItems, total: totalRow?.count ?? 0 });
 });
 
 app.post("/api/admin/products", requireRole(["admin", "manager"]), async (c) => {

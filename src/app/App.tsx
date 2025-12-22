@@ -40,7 +40,7 @@ const App: React.FC = () => {
         <Route
           path="/profile"
           element={
-            <RequireAuth roles={["customer"]}>
+            <RequireAuth>
               <CustomerProfilePage />
             </RequireAuth>
           }
@@ -72,7 +72,7 @@ const App: React.FC = () => {
         <Route
           path="/admin/orders"
           element={
-            <RequireAuth roles={["admin"]}>
+            <RequireAuth roles={["admin", "manager", "employee"]}>
               <AdminOrdersPage />
             </RequireAuth>
           }
