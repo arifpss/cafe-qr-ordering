@@ -17,7 +17,7 @@ export const StaffKitchenPage: React.FC = () => {
 
   const loadOrders = async () => {
     const data = await apiFetch<{ orders: StaffOrder[] }>(
-      "/api/staff/orders?status=ACCEPTED,PREPARING"
+      "/api/staff/orders?status=PREPARING,SERVING"
     );
     const newIds = new Set(data.orders.map((order) => order.id));
     const prevIds = prevIdsRef.current;
@@ -75,11 +75,11 @@ export const StaffKitchenPage: React.FC = () => {
                 ))}
               </div>
               <div className="flex gap-2">
-                {order.status === "ACCEPTED" && (
-                  <Button onClick={() => updateStatus(order.id, "PREPARING")}>Mark preparing</Button>
-                )}
                 {order.status === "PREPARING" && (
-                  <Button onClick={() => updateStatus(order.id, "READY")}>Mark ready</Button>
+                  <Button onClick={() => updateStatus(order.id, "SERVING")}>Mark serving</Button>
+                )}
+                {order.status === "SERVING" && (
+                  <Button onClick={() => updateStatus(order.id, "SERVED")}>Mark served</Button>
                 )}
               </div>
             </Card>

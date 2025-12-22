@@ -15,6 +15,11 @@
 - Front desk realtime alerts, countdown, and order/customer adjustments
 - Customer ETA countdown with sound notification
 
+## 0.1.4
+- Add admin All Orders view and status filtering
+- Update order statuses to RECEIVED/PREPARING/SERVING/SERVED/PAYMENT_RECEIVED
+- Front desk dropdown status control with per-order countdown timers
+
 ## 0.1.0
 - Initial scaffold with customer, staff, and admin UI flows
 - Hono API with auth, orders, menu, and reporting

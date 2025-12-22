@@ -47,14 +47,14 @@ export const CustomerStatusPage: React.FC = () => {
   }, []);
 
   const etaRemaining = useMemo(() => {
-    if (!order?.eta_at) return null;
+    if (!order?.eta_at || !["PREPARING", "SERVING"].includes(order.status)) return null;
     const diffMs = new Date(order.eta_at).getTime() - now;
     return Math.max(0, Math.ceil(diffMs / 1000));
-  }, [order?.eta_at, now]);
+  }, [order?.eta_at, order?.status, now]);
 
   useEffect(() => {
     if (!order?.eta_at || etaRemaining === null) return;
-    if (etaRemaining <= 0 && !etaAlertedRef.current && !["READY", "SERVED"].includes(order.status)) {
+    if (etaRemaining <= 0 && !etaAlertedRef.current && ["PREPARING", "SERVING"].includes(order.status)) {
       playTing();
       etaAlertedRef.current = true;
     }
@@ -97,7 +97,7 @@ export const CustomerStatusPage: React.FC = () => {
         <p className="text-sm text-[var(--text-muted)]">{order.order_code}</p>
         <div className="flex flex-wrap gap-3 text-sm">
           <span className="rounded-full border border-[var(--border)] px-3 py-1">{order.status}</span>
-          {order.eta_minutes && (
+          {etaRemaining !== null && (
             <span className="rounded-full border border-[var(--border)] px-3 py-1">
               {t("eta")}: {etaLabel ?? `${order.eta_minutes} ${t("minutes")}`}
             </span>
@@ -119,7 +119,7 @@ export const CustomerStatusPage: React.FC = () => {
         </div>
       </Card>
 
-      {order.status === "SERVED" && !reviewed && (
+      {["SERVED", "PAYMENT_RECEIVED"].includes(order.status) && !reviewed && (
         <Card className="space-y-3">
           <h3 className="font-display text-lg">{t("ratingPrompt")}</h3>
           <Input
@@ -135,7 +135,7 @@ export const CustomerStatusPage: React.FC = () => {
         </Card>
       )}
 
-      {order.status === "SERVED" && reviewed && (
+      {["SERVED", "PAYMENT_RECEIVED"].includes(order.status) && reviewed && (
         <Card className="text-center text-sm text-[var(--text-muted)]">{t("reviewThanks")}</Card>
       )}
     </div>

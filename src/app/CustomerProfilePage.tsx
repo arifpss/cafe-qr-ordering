@@ -39,6 +39,13 @@ export const CustomerProfilePage: React.FC = () => {
   if (!user || loading) {
     return <div className="py-12 text-center text-[var(--text-muted)]">Loading...</div>;
   }
+  if (user.phone.startsWith("GUEST-")) {
+    return (
+      <div className="py-12 text-center text-[var(--text-muted)]">
+        Guest accounts can only place orders and view order status. Please login to see your profile.
+      </div>
+    );
+  }
   if (error) {
     return <div className="py-12 text-center text-[var(--text-muted)]">{error}</div>;
   }

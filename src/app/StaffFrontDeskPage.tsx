@@ -31,7 +31,7 @@ export const StaffFrontDeskPage: React.FC = () => {
 
   const loadOrders = async () => {
     const data = await apiFetch<{ orders: StaffOrder[] }>(
-      "/api/staff/orders?status=PLACED,ACCEPTED,READY"
+      "/api/staff/orders?status=RECEIVED,PREPARING,SERVING,SERVED,PAYMENT_RECEIVED,CANCELLED"
     );
     const newIds = new Set(data.orders.map((order) => order.id));
     const prevIds = prevIdsRef.current;
@@ -66,8 +66,20 @@ export const StaffFrontDeskPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    setEtaMap((prev) => {
+      const next = { ...prev };
+      orders.forEach((order) => {
+        if (next[order.id] === undefined) {
+          next[order.id] = order.eta_minutes ?? 10;
+        }
+      });
+      return next;
+    });
+  }, [orders]);
+
+  useEffect(() => {
     orders.forEach((order) => {
-      if (order.status !== "PLACED") return;
+      if (order.status !== "RECEIVED") return;
       const placedAt = new Date(order.placed_at).getTime();
       if (now - placedAt < 60_000) return;
       const lastAlert = pendingAlertRef.current.get(order.id) ?? 0;
@@ -79,7 +91,7 @@ export const StaffFrontDeskPage: React.FC = () => {
       }
     });
     orders.forEach((order) => {
-      if (!order.eta_at || ["SERVED", "CANCELLED"].includes(order.status)) return;
+      if (!order.eta_at || !["PREPARING", "SERVING"].includes(order.status)) return;
       const etaAt = new Date(order.eta_at).getTime();
       if (etaAt > now) return;
       const lastAlert = etaAlertRef.current.get(order.id) ?? 0;
@@ -92,14 +104,10 @@ export const StaffFrontDeskPage: React.FC = () => {
     });
   }, [orders, now]);
 
-  const acceptOrder = async (id: string) => {
-    const eta = etaMap[id] ?? 10;
-    await apiPost(`/api/staff/orders/${id}/accept`, { etaMinutes: eta });
-    loadOrders();
-  };
-
   const updateStatus = async (id: string, status: string) => {
-    await apiPost(`/api/staff/orders/${id}/status`, { status });
+    const etaMinutes =
+      status === "PREPARING" || status === "SERVING" ? etaMap[id] ?? 10 : undefined;
+    await apiPost(`/api/staff/orders/${id}/status`, { status, etaMinutes });
     loadOrders();
   };
 
@@ -173,7 +181,7 @@ export const StaffFrontDeskPage: React.FC = () => {
 
   const countdownLabel = useMemo(() => {
     return (order: StaffOrder) => {
-      if (!order.eta_at) return null;
+      if (!order.eta_at || !["PREPARING", "SERVING"].includes(order.status)) return null;
       const diffMs = new Date(order.eta_at).getTime() - now;
       const remaining = Math.max(0, Math.ceil(diffMs / 1000));
       const minutes = Math.floor(remaining / 60);
@@ -181,6 +189,18 @@ export const StaffFrontDeskPage: React.FC = () => {
       return `${minutes}:${seconds.toString().padStart(2, "0")}`;
     };
   }, [now]);
+
+  const statusOptions = [
+    { value: "RECEIVED", label: "Received" },
+    { value: "PREPARING", label: "Preparing" },
+    { value: "SERVING", label: "Serving" },
+    { value: "SERVED", label: "Served" },
+    { value: "PAYMENT_RECEIVED", label: "Payment received" },
+    { value: "CANCELLED", label: "Cancelled" }
+  ];
+
+  const statusLabel = (status: string) =>
+    statusOptions.find((option) => option.value === status)?.label ?? status;
 
   if (loading) {
     return <div className="py-12 text-center text-[var(--text-muted)]">Loading front desk...</div>;
@@ -212,7 +232,9 @@ export const StaffFrontDeskPage: React.FC = () => {
                     )}
                   </h3>
                 </div>
-                <span className="rounded-full border border-[var(--border)] px-3 py-1 text-xs">{order.status}</span>
+                <span className="rounded-full border border-[var(--border)] px-3 py-1 text-xs">
+                  {statusLabel(order.status)}
+                </span>
               </div>
               <p className="text-xs text-[var(--text-muted)]">
                 {order.customer_name ?? "Guest"} placed order at {order.table_label}. Go and check with the customer and change order status.
@@ -225,29 +247,30 @@ export const StaffFrontDeskPage: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {order.status === "PLACED" && (
-                  <>
-                    <Input
-                      label="ETA (minutes)"
-                      type="number"
-                      value={etaMap[order.id] ?? 10}
-                      onChange={(event) =>
-                        setEtaMap((prev) => ({ ...prev, [order.id]: Number(event.target.value) }))
-                      }
-                    />
-                    <Button onClick={() => acceptOrder(order.id)}>Accept</Button>
-                  </>
-                )}
-                {order.status === "READY" && (
-                  <Button onClick={() => updateStatus(order.id, "SERVED")}>Mark served</Button>
-                )}
-                {order.status === "ACCEPTED" && (
-                  <Button onClick={() => updateStatus(order.id, "PREPARING")}>Mark preparing</Button>
-                )}
-                {order.status === "PREPARING" && (
-                  <Button onClick={() => updateStatus(order.id, "READY")}>Mark ready</Button>
-                )}
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-sm text-[var(--text-muted)]">
+                  Status
+                  <select
+                    className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+                    value={order.status}
+                    onChange={(event) => updateStatus(order.id, event.target.value)}
+                  >
+                    {statusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Input
+                  label="ETA (min) for Preparing/Serving"
+                  type="number"
+                  min={1}
+                  value={etaMap[order.id] ?? 10}
+                  onChange={(event) =>
+                    setEtaMap((prev) => ({ ...prev, [order.id]: Number(event.target.value) }))
+                  }
+                />
                 <Button variant="outline" onClick={() => startEditItems(order)}>
                   Adjust items
                 </Button>

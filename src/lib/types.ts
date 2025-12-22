@@ -1,5 +1,11 @@
 export type UserRole = "customer" | "admin" | "manager" | "chef" | "employee";
-export type OrderStatus = "PLACED" | "ACCEPTED" | "PREPARING" | "READY" | "SERVED" | "CANCELLED";
+export type OrderStatus =
+  | "RECEIVED"
+  | "PREPARING"
+  | "SERVING"
+  | "SERVED"
+  | "PAYMENT_RECEIVED"
+  | "CANCELLED";
 export type ThemeName = "cyberpunk" | "windows11" | "apple";
 
 export interface BadgeInfo {

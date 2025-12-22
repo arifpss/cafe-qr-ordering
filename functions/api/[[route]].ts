@@ -632,7 +632,7 @@ app.post("/api/orders", requireAuth, async (c) => {
     const orderId = crypto.randomUUID();
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      "INSERT INTO orders (id, order_code, location_id, table_id, customer_id, status, placed_at, total_before_discount_tk, discount_percent_applied, discount_amount_tk, total_after_discount_tk, points_earned, notes) VALUES (?, ?, ?, ?, ?, 'PLACED', ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO orders (id, order_code, location_id, table_id, customer_id, status, placed_at, total_before_discount_tk, discount_percent_applied, discount_amount_tk, total_after_discount_tk, points_earned, notes) VALUES (?, ?, ?, ?, ?, 'RECEIVED', ?, ?, ?, ?, ?, ?, ?)"
     )
       .bind(
         orderId,
@@ -666,7 +666,7 @@ app.post("/api/orders", requireAuth, async (c) => {
       )
     );
     await c.env.DB.batch(itemStatements);
-    await createOrderEvent(c.env.DB, orderId, "PLACED", user.id, null);
+    await createOrderEvent(c.env.DB, orderId, "RECEIVED", user.id, null);
 
     return c.json({ orderId });
   } catch (error) {
@@ -679,6 +679,10 @@ app.get("/api/orders/current", requireAuth, async (c) => {
   if (!tableCode) {
     return c.json({ error: "Missing tableCode" }, 400);
   }
+  const user = c.get("user") as UserRecord;
+  if (user.role !== "customer") {
+    return c.json({ error: "Only customers can view current orders" }, 403);
+  }
   const table = await c.env.DB.prepare("SELECT id FROM tables WHERE code = ?")
     .bind(tableCode)
     .first<any>();
@@ -686,9 +690,9 @@ app.get("/api/orders/current", requireAuth, async (c) => {
     return c.json({ error: "Table not found" }, 404);
   }
   const order = await c.env.DB.prepare(
-    "SELECT * FROM orders WHERE table_id = ? AND status IN ('PLACED','ACCEPTED','PREPARING','READY') ORDER BY placed_at DESC LIMIT 1"
+    "SELECT * FROM orders WHERE table_id = ? AND customer_id = ? AND status IN ('RECEIVED','PREPARING','SERVING') ORDER BY placed_at DESC LIMIT 1"
   )
-    .bind(table.id)
+    .bind(table.id, user.id)
     .first<any>();
   if (!order) {
     return c.json({ order: null });
@@ -704,6 +708,9 @@ app.get("/api/orders/history", requireAuth, async (c) => {
   const user = c.get("user") as UserRecord;
   if (user.role !== "customer") {
     return c.json({ error: "Only customers can view history" }, 403);
+  }
+  if (user.phone.startsWith("GUEST-")) {
+    return c.json({ error: "Guest accounts do not have order history" }, 403);
   }
   const orders = await c.env.DB.prepare("SELECT * FROM orders WHERE customer_id = ? ORDER BY placed_at DESC LIMIT 50")
     .bind(user.id)
@@ -748,7 +755,7 @@ app.post("/api/orders/:id/review", requireAuth, async (c) => {
     if (user.role !== "customer" || order.customer_id !== user.id) {
       return c.json({ error: "Forbidden" }, 403);
     }
-    if (order.status !== "SERVED") {
+    if (!["SERVED", "PAYMENT_RECEIVED"].includes(order.status)) {
       return c.json({ error: "Order not served yet" }, 400);
     }
     const existing = await c.env.DB.prepare("SELECT id FROM reviews WHERE order_id = ?")
@@ -770,7 +777,7 @@ app.post("/api/orders/:id/review", requireAuth, async (c) => {
 
 app.get("/api/staff/orders", requireRole(["chef", "employee", "manager", "admin"]), async (c) => {
   const statusParam = c.req.query("status");
-  const statuses = statusParam ? statusParam.split(",") : ["PLACED"];
+  const statuses = statusParam ? statusParam.split(",") : ["RECEIVED"];
   const placeholders = statuses.map(() => "?").join(",");
   const orders = await c.env.DB.prepare(
     `SELECT orders.*, tables.label as table_label, users.name as customer_name, users.phone as customer_phone, users.id as customer_id FROM orders JOIN tables ON tables.id = orders.table_id LEFT JOIN users ON users.id = orders.customer_id WHERE orders.status IN (${placeholders}) ORDER BY orders.placed_at ASC`
@@ -809,18 +816,18 @@ app.post("/api/staff/orders/:id/accept", requireRole(["employee", "manager", "ad
     if (!order) {
       return c.json({ error: "Order not found" }, 404);
     }
-    if (order.status !== "PLACED") {
+    if (order.status !== "RECEIVED") {
       return c.json({ error: "Order cannot be accepted" }, 400);
     }
     const now = new Date();
     const etaAt = new Date(now.getTime() + data.etaMinutes * 60000).toISOString();
     await c.env.DB.prepare(
-      "UPDATE orders SET status = 'ACCEPTED', accepted_at = ?, eta_minutes = ?, eta_at = ? WHERE id = ?"
+      "UPDATE orders SET status = 'PREPARING', accepted_at = ?, eta_minutes = ?, eta_at = ? WHERE id = ?"
     )
       .bind(now.toISOString(), data.etaMinutes, etaAt, orderId)
       .run();
     const user = c.get("user") as UserRecord;
-    await createOrderEvent(c.env.DB, orderId, "ACCEPTED", user.id, { etaMinutes: data.etaMinutes });
+    await createOrderEvent(c.env.DB, orderId, "PREPARING", user.id, { etaMinutes: data.etaMinutes });
     return c.json({ ok: true });
   } catch (error) {
     return c.json({ error: "Invalid request", details: String(error) }, 400);
@@ -829,7 +836,10 @@ app.post("/api/staff/orders/:id/accept", requireRole(["employee", "manager", "ad
 
 app.post("/api/staff/orders/:id/status", requireRole(["chef", "employee", "manager", "admin"]), async (c) => {
   try {
-    const schema = z.object({ status: z.enum(["PREPARING", "READY", "SERVED", "CANCELLED"]) });
+    const schema = z.object({
+      status: z.enum(["RECEIVED", "PREPARING", "SERVING", "SERVED", "PAYMENT_RECEIVED", "CANCELLED"]),
+      etaMinutes: z.number().int().min(1).max(240).optional()
+    });
     const data = await parseJson(c.req.raw, schema);
     const orderId = c.req.param("id");
     const order = await c.env.DB.prepare("SELECT status, customer_id, points_earned FROM orders WHERE id = ?")
@@ -844,20 +854,33 @@ app.post("/api/staff/orders/:id/status", requireRole(["chef", "employee", "manag
     if (data.status === "PREPARING") {
       updates.push("accepted_at = COALESCE(accepted_at, ?)");
       binds.push(now);
+      const etaMinutes = data.etaMinutes ?? 10;
+      const etaAt = new Date(Date.now() + etaMinutes * 60000).toISOString();
+      updates.push("eta_minutes = ?", "eta_at = ?");
+      binds.push(etaMinutes, etaAt);
     }
-    if (data.status === "READY") {
-      updates.push("eta_at = COALESCE(eta_at, ?)");
-      binds.push(now);
+    if (data.status === "SERVING") {
+      const etaMinutes = data.etaMinutes ?? 5;
+      const etaAt = new Date(Date.now() + etaMinutes * 60000).toISOString();
+      updates.push("eta_minutes = ?", "eta_at = ?");
+      binds.push(etaMinutes, etaAt);
+    }
+    if (["SERVED", "PAYMENT_RECEIVED", "CANCELLED", "RECEIVED"].includes(data.status)) {
+      updates.push("eta_at = NULL", "eta_minutes = NULL");
     }
     if (data.status === "SERVED" && order.status !== "SERVED") {
       updates.push("served_at = ?");
+      binds.push(now);
+    }
+    if (data.status === "PAYMENT_RECEIVED") {
+      updates.push("served_at = COALESCE(served_at, ?)");
       binds.push(now);
     }
     binds.push(orderId);
     await c.env.DB.prepare(`UPDATE orders SET ${updates.join(", ")} WHERE id = ?`)
       .bind(...binds)
       .run();
-    if (data.status === "SERVED") {
+    if (data.status === "PAYMENT_RECEIVED") {
       await c.env.DB.prepare(
         "UPDATE user_points SET points_total = points_total + ?, updated_at = ? WHERE user_id = ?"
       )
@@ -1073,6 +1096,29 @@ app.get("/api/admin/products", requireRole(["admin", "manager"]), async (c) => {
     .all();
   const total = await c.env.DB.prepare("SELECT COUNT(*) as count FROM products").first<{ count: number }>();
   return c.json({ items: items.results, total: total?.count ?? 0 });
+});
+
+app.get("/api/admin/orders", requireRole(["admin", "manager"]), async (c) => {
+  const page = Number(c.req.query("page") ?? 1);
+  const pageSize = Math.min(Number(c.req.query("pageSize") ?? 20), 200);
+  const offset = (page - 1) * pageSize;
+  const status = c.req.query("status");
+  const filters: string[] = [];
+  const binds: any[] = [];
+  if (status && status !== "ALL") {
+    filters.push("orders.status = ?");
+    binds.push(status);
+  }
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const rows = await c.env.DB.prepare(
+    `SELECT orders.*, tables.label as table_label, users.name as customer_name, users.phone as customer_phone FROM orders JOIN tables ON tables.id = orders.table_id LEFT JOIN users ON users.id = orders.customer_id ${where} ORDER BY orders.placed_at DESC LIMIT ? OFFSET ?`
+  )
+    .bind(...binds, pageSize, offset)
+    .all();
+  const totalRow = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM orders ${where}`)
+    .bind(...binds)
+    .first<{ count: number }>();
+  return c.json({ items: rows.results, total: totalRow?.count ?? 0 });
 });
 
 app.post("/api/admin/products", requireRole(["admin", "manager"]), async (c) => {
@@ -1334,14 +1380,14 @@ app.get("/api/admin/reports/sales", requireRole(["admin", "manager"]), async (c)
   const range = c.req.query("range") ?? "daily";
   const format = range === "monthly" ? "%Y-%m" : range === "yearly" ? "%Y" : "%Y-%m-%d";
   const rows = await c.env.DB.prepare(
-    `SELECT strftime('${format}', served_at) as period, SUM(total_after_discount_tk) as total FROM orders WHERE status = 'SERVED' GROUP BY period ORDER BY period DESC LIMIT 60`
+    `SELECT strftime('${format}', served_at) as period, SUM(total_after_discount_tk) as total FROM orders WHERE status = 'PAYMENT_RECEIVED' GROUP BY period ORDER BY period DESC LIMIT 60`
   ).all();
   return c.json({ rows: rows.results });
 });
 
 app.get("/api/admin/reports/best-items", requireRole(["admin", "manager"]), async (c) => {
   const rows = await c.env.DB.prepare(
-    "SELECT product_name_snapshot_en as name, SUM(qty) as qty FROM order_items JOIN orders ON orders.id = order_items.order_id WHERE orders.status = 'SERVED' GROUP BY product_name_snapshot_en ORDER BY qty DESC LIMIT 10"
+    "SELECT product_name_snapshot_en as name, SUM(qty) as qty FROM order_items JOIN orders ON orders.id = order_items.order_id WHERE orders.status = 'PAYMENT_RECEIVED' GROUP BY product_name_snapshot_en ORDER BY qty DESC LIMIT 10"
   ).all();
   return c.json({ items: rows.results });
 });

@@ -11,6 +11,7 @@ import { LeaderboardPage } from "./LeaderboardPage";
 import { StaffKitchenPage } from "./StaffKitchenPage";
 import { StaffFrontDeskPage } from "./StaffFrontDeskPage";
 import { AdminDashboardPage } from "./AdminDashboardPage";
+import { AdminOrdersPage } from "./AdminOrdersPage";
 import { NotFoundPage } from "./NotFoundPage";
 
 const RequireAuth: React.FC<{ children: React.ReactNode; roles?: string[] }> = ({ children, roles }) => {
@@ -65,6 +66,14 @@ const App: React.FC = () => {
           element={
             <RequireAuth roles={["admin", "manager"]}>
               <AdminDashboardPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/orders"
+          element={
+            <RequireAuth roles={["admin"]}>
+              <AdminOrdersPage />
             </RequireAuth>
           }
         />

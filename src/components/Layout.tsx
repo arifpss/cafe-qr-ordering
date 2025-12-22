@@ -42,6 +42,11 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 {t("admin")}
               </NavLink>
             )}
+            {user?.role === "admin" && (
+              <NavLink to="/admin/orders" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
+                {t("allOrders")}
+              </NavLink>
+            )}
             {!user ? (
               <NavLink to="/login" className={({ isActive }) => `${navBase} ${isActive ? navActive : "text-[var(--text-muted)]"}`}>
                 {t("login")}
